@@ -29,7 +29,7 @@ cpm-param-selector/
 │   ├── param_selector.py    # Grid search + 5 auto-selection methods
 │   └── visualize.py         # Table image rendering
 ├── scripts/
-│   └── run_param_search.py  # CLI script for running grid search
+│   └── run_param_search.py  # CLI: grid search + auto-select + visualization
 └── tests/
     └── test_cpm.py          # Unit tests
 ```
@@ -37,10 +37,30 @@ cpm-param-selector/
 ## Installation
 
 ```bash
-pip install -e .
+git clone https://github.com/1996TH/cpm-parameter-selector.git
+cd cpm-parameter-selector
+python -m pip install -e .
 ```
 
 ## Quick Start
+
+### Run the script (easiest)
+
+```bash
+python scripts/run_param_search.py SPY QQQ GLD
+```
+
+This generates for each asset:
+
+```
+output/SPY/
+├── grid_search_table.png   # (P, T) grid search table
+├── SPY_P0.18_T8.png        # Knee result: price + turning points + triangle wave
+├── SPY_P0.08_T14.png       # Saturation result
+└── SPY_pareto.png          # Pareto front comparing both methods
+```
+
+### Use as a library
 
 ```python
 from cpm import load_prices, auto_select, print_table
@@ -112,6 +132,6 @@ The trade-off: fewer points = more noise removed, but higher approximation error
 ## Tests
 
 ```bash
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 pytest tests/ -v
 ```
