@@ -127,9 +127,7 @@ def run_asset(ticker):
     save_dir = os.path.join("output", ticker)
     os.makedirs(save_dir, exist_ok=True)
 
-    print(f"\n{'='*50}")
-    print(f"  {ticker}")
-    print(f"{'='*50}")
+    print(f"\n--- {ticker} ---")
 
     prices = load_prices(ticker)
     extrema = extract_local_extrema(prices)

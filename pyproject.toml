@@ -2,16 +2,19 @@
 name = "cpm-param-selector"
 version = "0.1.0"
 description = "Automatic parameter selection for Critical Point Model (CPM) in financial time series"
-requires-python = ">=3.8"
+requires-python = ">=3.12"
 dependencies = [
-    "numpy>=1.24",
-    "pandas>=2.0",
-    "matplotlib>=3.7",
-    "yfinance>=0.2",
+    "numpy>=2.0",
+    "pandas>=3.0",
+    "matplotlib>=3.10",
+    "yfinance>=1.2",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+dev = ["pytest>=7.0", "pytest-mock>=3.0"]
+
+[tool.setuptools.packages.find]
+include = ["cpm*"]
 
 [build-system]
 requires = ["setuptools>=68.0"]

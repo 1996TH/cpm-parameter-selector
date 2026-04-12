@@ -84,6 +84,58 @@ class TestParamSelector:
             auto_select(sample_prices, method="invalid")
 
 
+class TestLoader:
+    def test_reads_csv_when_exists(self, tmp_path, monkeypatch):
+        """reads local CSV when it exists"""
+        import cpm.loader as loader
+
+        csv = tmp_path / "TEST.csv"
+        csv.write_text("Date,Open,High,Low,Close,Volume,Symbol\n2024-01-01,100,110,90,105,1000,TEST\n2024-01-02,105,115,95,110,1200,TEST\n")
+
+        monkeypatch.setattr(loader, "_get_ohlcv_dir", lambda: tmp_path)
+        prices = loader.load_prices("TEST")
+        assert len(prices) == 2
+        assert prices[0] == pytest.approx(105.0)
+        assert prices[1] == pytest.approx(110.0)
+
+    def test_fallback_when_no_csv(self, tmp_path, monkeypatch, mocker):
+        """falls back to yfinance with warning when no CSV"""
+        import cpm.loader as loader
+
+        monkeypatch.setattr(loader, "_get_ohlcv_dir", lambda: tmp_path)
+
+        mock_df = mocker.MagicMock()
+        mock_df.empty = False
+        mock_df.__getitem__ = lambda self, key: mocker.MagicMock(
+            values=np.array([[100.0, 200.0]])
+        )
+        mocker.patch("yfinance.download", return_value=mock_df)
+
+        with pytest.warns(UserWarning, match="CSV not found"):
+            prices = loader.load_prices("FAKE_TICKER")
+        assert len(prices) > 0
+
+    def test_skips_broken_csv(self, tmp_path, monkeypatch, mocker):
+        """falls back with warning when CSV has no Close column"""
+        import cpm.loader as loader
+
+        csv = tmp_path / "BROKEN.csv"
+        csv.write_text("Date,Open,High,Low\n2024-01-01,100,110,90\n")
+
+        monkeypatch.setattr(loader, "_get_ohlcv_dir", lambda: tmp_path)
+
+        mock_df = mocker.MagicMock()
+        mock_df.empty = False
+        mock_df.__getitem__ = lambda self, key: mocker.MagicMock(
+            values=np.array([[100.0]])
+        )
+        mocker.patch("yfinance.download", return_value=mock_df)
+
+        with pytest.warns(UserWarning, match="missing 'Close' column"):
+            prices = loader.load_prices("BROKEN")
+        assert len(prices) > 0
+
+
 class TestPublicAPI:
     def test_import_all(self):
         from cpm import (
