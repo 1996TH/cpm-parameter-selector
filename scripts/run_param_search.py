@@ -1,10 +1,27 @@
 """Run P,T grid search + auto selection + visualization for specified assets.
 
-Usage (after python -m pip install -e .):
+Usage (after ``python -m pip install -e .`` from the project root):
+
+  기본 그리드·티커
+    ``GridSearchConfig`` 와 동일한 P/T 범위·간격(기본값)과, 내장 ETF 목록(SPY, QQQ, …)으로 실행.
+
     python scripts/run_param_search.py
+
+  티커만 지정
+    그리드는 기본값 그대로, 심볼만 바꿔서 실행.
+
     python scripts/run_param_search.py SPY GLD
+
+  메소드·P/T 그리드·티커 지정
+    - ``--method``: 자동 선택 방식 (knee, saturation, constrained, curvature, knee_log)
+    - ``--p-min`` / ``--p-max`` / ``--p-step``: 가격 변동 임계 P의 탐색 구간·간격
+    - ``--t-min`` / ``--t-max`` / ``--t-step``: 전환점 최소 간격 T(일)의 구간·간격
+    아래는 기본 그리드와 동일한 값의 예시이며, 이 플래그들을 모두 생략해도 같은 기본 그리드가 쓰임.
+
+    python scripts/run_param_search.py --method knee --p-min 0.02 --p-max 0.18 --p-step 0.02 --t-min 4 --t-max 16 --t-step 2 SPY
 """
 
+import argparse
 import os
 import sys
 
@@ -14,9 +31,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from cpm import (
+    METHODS,
     auto_select,
     extract_local_extrema,
-    grid_search,
     load_prices,
     print_table,
     render_table_image,
@@ -24,9 +41,11 @@ from cpm import (
     to_triangle_wave,
     compute_normalized_error,
 )
-from cpm.param_selector import _pareto_front, _find_knee
+from cpm.config import default_cli_grid_bounds, grid_config_from_ranges
+from cpm.param_selector import _pareto_front
 
 TICKERS = ["SPY", "QQQ", "TLT", "GLD", "USO", "BITO"]
+METHOD_CHOICES = tuple(sorted(METHODS.keys()))
 
 
 def plot_cpm(prices, ticker, P, T, save_dir):
@@ -66,53 +85,49 @@ def plot_cpm(prices, ticker, P, T, save_dir):
     return fname
 
 
-def plot_pareto(prices, ticker, save_dir):
-    """Pareto front with Saturation and Knee points."""
-    from cpm.param_selector import _select_saturation, _select_knee
-
-    df = grid_search(prices)
+def plot_pareto(ticker, save_dir, df, method: str, P_sel: float, T_sel: int):
+    """Pareto front with the selected method's (P, T) highlighted."""
     pts = df["n_points"].values.astype(float)
     errs = df["error_raw"].values.astype(float)
-    labels = [f"P={r['P']:.2f}, T={int(r['T'])}" for _, r in df.iterrows()]
 
-    fp, fe, fi = _pareto_front(pts, errs)
-    k = _find_knee(fp, fe)
-    knee_idx = fi[k]
+    fp, fe, _ = _pareto_front(pts, errs)
 
-    sat_P, sat_T = _select_saturation(df)
-    sat_row = df[(df["P"] == sat_P) & (df["T"] == sat_T)].iloc[0]
+    sel = df[
+        np.isclose(df["P"].to_numpy(dtype=float), float(P_sel))
+        & (df["T"].to_numpy() == int(T_sel))
+    ]
+    if len(sel) == 0:
+        sel = df.iloc[[0]]
+    row = sel.iloc[0]
+    sel_label = f"{method}: P={row['P']:.2f}, T={int(row['T'])}"
 
     fig, ax = plt.subplots(figsize=(10, 7))
 
     ax.scatter(pts, errs, color="#dddddd", s=20, zorder=1)
     ax.plot(fp, fe, "o-", color="#3498db", linewidth=2, markersize=5, zorder=2, label="Pareto front")
 
-    # Knee
-    ax.plot(pts[knee_idx], errs[knee_idx], "*", color="#e74c3c", markersize=25, zorder=4,
+    ax.plot(row["n_points"], row["error_raw"], "*", color="#e74c3c", markersize=25, zorder=4,
             markeredgecolor="black", markeredgewidth=0.8)
-    ax.annotate(labels[knee_idx], (pts[knee_idx], errs[knee_idx]),
-               textcoords="offset points", xytext=(12, 12), fontsize=10, fontweight="bold",
-               bbox=dict(boxstyle="round,pad=0.3", facecolor="#ffcccc", edgecolor="#e74c3c"),
-               arrowprops=dict(arrowstyle="->", color="#e74c3c", linewidth=1.5))
-
-    # Saturation
-    ax.plot(sat_row["n_points"], sat_row["error_raw"], "s", color="#27ae60", markersize=14, zorder=4,
-            markeredgecolor="black", markeredgewidth=0.8)
-    ax.annotate(f"P={sat_P:.2f}, T={sat_T}", (sat_row["n_points"], sat_row["error_raw"]),
-               textcoords="offset points", xytext=(12, -15), fontsize=10, fontweight="bold",
-               bbox=dict(boxstyle="round,pad=0.3", facecolor="#ccffcc", edgecolor="#27ae60"),
-               arrowprops=dict(arrowstyle="->", color="#27ae60", linewidth=1.5))
+    ax.annotate(
+        sel_label,
+        (row["n_points"], row["error_raw"]),
+        textcoords="offset points",
+        xytext=(12, 12),
+        fontsize=10,
+        fontweight="bold",
+        bbox=dict(boxstyle="round,pad=0.3", facecolor="#ffeecc", edgecolor="#e67e22"),
+        arrowprops=dict(arrowstyle="->", color="#e67e22", linewidth=1.5),
+    )
 
     from matplotlib.lines import Line2D
     handles = [
         Line2D([0], [0], marker="o", color="#3498db", linewidth=2, markersize=5, label="Pareto front"),
-        Line2D([0], [0], marker="*", color="#e74c3c", markersize=15, linestyle="None", label="Pareto Knee"),
-        Line2D([0], [0], marker="s", color="#27ae60", markersize=10, linestyle="None", label="Saturation"),
+        Line2D([0], [0], marker="*", color="#e74c3c", markersize=15, linestyle="None", label=f"Selected ({method})"),
     ]
     ax.legend(handles=handles, fontsize=11)
     ax.set_xlabel("# Critical Points", fontsize=13)
     ax.set_ylabel("Normalized Error (%)", fontsize=13)
-    ax.set_title(f"{ticker} -- Pareto Front", fontsize=14, fontweight="bold")
+    ax.set_title(f"{ticker} -- Pareto Front ({method})", fontsize=14, fontweight="bold")
     ax.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -122,45 +137,95 @@ def plot_pareto(prices, ticker, save_dir):
     return fname
 
 
-def run_asset(ticker):
+def run_asset(ticker, method: str, config):
     """Full pipeline for one asset: table + auto-select + charts."""
     save_dir = os.path.join("output", ticker)
     os.makedirs(save_dir, exist_ok=True)
 
     print(f"\n--- {ticker} ---")
+    pv, tv = config.P_values, config.T_values
+    p_part = f"P in [{pv[0]:.4g}..{pv[-1]:.4g}]"
+    if len(pv) > 1:
+        p_part += f" step {pv[1] - pv[0]:.4g}"
+    t_part = f"T in [{tv[0]}..{tv[-1]}]"
+    if len(tv) > 1:
+        t_part += f" step {tv[1] - tv[0]}"
+    print(f"  method={method}, {p_part}")
+    print(f"  {t_part}")
 
     prices = load_prices(ticker)
     extrema = extract_local_extrema(prices)
     print(f"  {len(prices)} days, {len(extrema)} extrema\n")
 
     # 1. Grid search table (console + image)
-    df = print_table(prices, ticker=ticker)
+    df = print_table(prices, ticker=ticker, config=config)
     render_table_image(df, ticker, os.path.join(save_dir, "grid_search_table.png"))
     print(f"  Saved: {save_dir}/grid_search_table.png")
 
     # 2. Auto-selection
-    results = {}
-    for method in ["knee", "saturation"]:
-        P, T = auto_select(prices, method=method)
-        results[method] = (P, T)
-        print(f"  {method:14s} -> P={P:.2f}, T={T}")
+    P, T = auto_select(prices, config=config, method=method)
+    print(f"  {method:14s} -> P={P:.2f}, T={T}")
 
-    # 3. CPM + triangle wave for each method
-    for method, (P, T) in results.items():
-        fname = plot_cpm(prices, ticker, P, T, save_dir)
-        print(f"  Saved: {fname}")
+    # 3. CPM + triangle wave
+    fname = plot_cpm(prices, ticker, P, T, save_dir)
+    print(f"  Saved: {fname}")
 
     # 4. Pareto front
-    fname = plot_pareto(prices, ticker, save_dir)
+    fname = plot_pareto(ticker, save_dir, df, method, P, T)
     print(f"  Saved: {fname}")
 
     print(f"\n  Done: {save_dir}/")
 
 
+def _build_arg_parser() -> argparse.ArgumentParser:
+    dp_min, dp_max, dp_step, dt_min, dt_max, dt_step = default_cli_grid_bounds()
+    p = argparse.ArgumentParser(
+        description="CPM grid search and automatic (P, T) selection.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument(
+        "tickers",
+        nargs="*",
+        help="Symbols to process (default: built-in ETF list)",
+    )
+    p.add_argument(
+        "--method",
+        choices=METHOD_CHOICES,
+        default="knee",
+        help="Selection method",
+    )
+    p.add_argument(
+        "--p-min",
+        type=float,
+        default=dp_min,
+        help="P grid minimum (defaults match cpm.config.GridSearchConfig)",
+    )
+    p.add_argument("--p-max", type=float, default=dp_max, help="P grid maximum (inclusive)")
+    p.add_argument("--p-step", type=float, default=dp_step, help="P grid step")
+    p.add_argument("--t-min", type=int, default=dt_min, help="T grid minimum (days)")
+    p.add_argument("--t-max", type=int, default=dt_max, help="T grid maximum (days, inclusive)")
+    p.add_argument("--t-step", type=int, default=dt_step, help="T grid step (days)")
+    return p
+
+
 def main():
-    tickers = sys.argv[1:] if len(sys.argv) > 1 else TICKERS
+    args = _build_arg_parser().parse_args()
+    try:
+        config = grid_config_from_ranges(
+            args.p_min,
+            args.p_max,
+            args.p_step,
+            args.t_min,
+            args.t_max,
+            args.t_step,
+        )
+    except ValueError as e:
+        print(f"Invalid grid: {e}", file=sys.stderr)
+        sys.exit(2)
+
+    tickers = args.tickers if args.tickers else TICKERS
     for ticker in tickers:
-        run_asset(ticker)
+        run_asset(ticker, args.method, config)
 
 
 if __name__ == "__main__":
