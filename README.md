@@ -12,7 +12,7 @@ Determines noise filtering level when finding turning points in price series.
 - Bao & Yang (2008), "Intelligent stock trading system by turning point confirming and probabilistic reasoning"
 - Lin et al. (2011), "Intelligent stock trading system based on improved technical analysis and Echo State Network"
 
-Extends Bao (2008) Table 1 grid search to multi-asset ETFs + 5 auto-selection methods.
+Extends Bao (2008) Table 1 grid search to multi-asset ETFs + 9 auto-selection methods.
 
 ## Structure
 
@@ -50,6 +50,10 @@ P, T = auto_select(prices, method="saturation")
 - `constrained` - NE upper bound
 - `curvature` - Max curvature
 - `knee_log` - Pareto Knee (Log)
+- `ideal_point` - Min distance to ideal point
+- `weighted_sum` - Min weighted sum
+- `max_angle` - Maximum bend angle
+- `slope` - Slope target matching (default -1)
 
 ## Data
 
