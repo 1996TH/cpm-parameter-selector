@@ -1,11 +1,15 @@
 """Automatic parameter selection for CPM.
 
-Five methods for selecting optimal (P, T):
-    1. saturation   -- Two-stage saturation (conservative)
-    2. constrained  -- NE upper bound + min points
-    3. curvature    -- Max curvature on Pareto front
-    4. knee         -- Pareto Knee, linear normalization (default)
-    5. knee_log     -- Pareto Knee, log normalization
+Methods for selecting optimal (P, T):
+    1. saturation    -- Two-stage saturation (conservative)
+    2. constrained   -- NE upper bound + min points
+    3. curvature     -- Max curvature on Pareto front
+    4. knee          -- Pareto Knee, linear normalization (default)
+    5. knee_log      -- Pareto Knee, log normalization
+    6. ideal_point   -- Min distance to ideal point (NE=0, NC=0)
+    7. weighted_sum  -- Min weighted score (w*NE + (1-w)*NC)
+    8. max_angle     -- Most pronounced bend by local angle
+    9. slope         -- Closest local slope to target (default -1)
 
 References:
     - Bao (2008), Table 1: grid search over P and T for IBM
@@ -222,12 +226,76 @@ def _select_knee_log(df: pd.DataFrame) -> tuple:
     return df.iloc[fi[k]]["P"], int(df.iloc[fi[k]]["T"])
 
 
+def _select_ideal_point(df: pd.DataFrame) -> tuple:
+    """Method 6: Min Euclidean distance to ideal point on Pareto front."""
+    pts = df["n_points"].values.astype(float)
+    errs = df["error_raw"].values.astype(float)
+    fp, fe, fi = _pareto_front(pts, errs)
+    x = (fp - fp.min()) / (fp.max() - fp.min() + 1e-10)
+    y = (fe - fe.min()) / (fe.max() - fe.min() + 1e-10)
+    d = np.sqrt(x**2 + y**2)
+    k = int(np.argmin(d))
+    return df.iloc[fi[k]]["P"], int(df.iloc[fi[k]]["T"])
+
+
+def _select_weighted_sum(df: pd.DataFrame, w: float = 0.5) -> tuple:
+    """Method 7: Min weighted sum on normalized Pareto front."""
+    pts = df["n_points"].values.astype(float)
+    errs = df["error_raw"].values.astype(float)
+    fp, fe, fi = _pareto_front(pts, errs)
+    x = (fp - fp.min()) / (fp.max() - fp.min() + 1e-10)
+    y = (fe - fe.min()) / (fe.max() - fe.min() + 1e-10)
+    score = w * y + (1.0 - w) * x
+    k = int(np.argmin(score))
+    return df.iloc[fi[k]]["P"], int(df.iloc[fi[k]]["T"])
+
+
+def _select_max_angle(df: pd.DataFrame) -> tuple:
+    """Method 8: Minimum inner angle on Pareto front."""
+    pts = df["n_points"].values.astype(float)
+    errs = df["error_raw"].values.astype(float)
+    fp, fe, fi = _pareto_front(pts, errs)
+    n = len(fp)
+    if n < 3:
+        return df.iloc[fi[0]]["P"], int(df.iloc[fi[0]]["T"])
+    x = (fp - fp.min()) / (fp.max() - fp.min() + 1e-10)
+    y = (fe - fe.min()) / (fe.max() - fe.min() + 1e-10)
+    angles = np.full(n, np.inf)
+    for i in range(1, n - 1):
+        v1 = np.array([x[i - 1] - x[i], y[i - 1] - y[i]])
+        v2 = np.array([x[i + 1] - x[i], y[i + 1] - y[i]])
+        denom = (np.linalg.norm(v1) * np.linalg.norm(v2)) + 1e-10
+        cos_theta = np.clip(np.dot(v1, v2) / denom, -1.0, 1.0)
+        angles[i] = np.arccos(cos_theta)
+    k = int(np.argmin(angles))
+    return df.iloc[fi[k]]["P"], int(df.iloc[fi[k]]["T"])
+
+
+def _select_slope(df: pd.DataFrame, target_slope: float = -1.0) -> tuple:
+    """Method 9: Closest local slope to target slope on Pareto front."""
+    pts = df["n_points"].values.astype(float)
+    errs = df["error_raw"].values.astype(float)
+    fp, fe, fi = _pareto_front(pts, errs)
+    n = len(fp)
+    if n < 2:
+        return df.iloc[fi[0]]["P"], int(df.iloc[fi[0]]["T"])
+    x = (fp - fp.min()) / (fp.max() - fp.min() + 1e-10)
+    y = (fe - fe.min()) / (fe.max() - fe.min() + 1e-10)
+    slopes = np.gradient(y, x + 1e-10)
+    k = int(np.argmin(np.abs(slopes - target_slope)))
+    return df.iloc[fi[k]]["P"], int(df.iloc[fi[k]]["T"])
+
+
 METHODS = {
     "saturation": _select_saturation,   # 1
     "constrained": _select_constrained, # 2
     "curvature": _select_curvature,     # 3
     "knee": _select_knee,               # 4
     "knee_log": _select_knee_log,       # 5
+    "ideal_point": _select_ideal_point, # 6
+    "weighted_sum": _select_weighted_sum, # 7
+    "max_angle": _select_max_angle,     # 8
+    "slope": _select_slope,             # 9
 }
 
 
@@ -241,7 +309,8 @@ def auto_select(
     Args:
         prices: 1-D close price array.
         config: Grid search ranges.
-        method: "knee" (default), "saturation", "constrained", "curvature", "knee_log"
+        method: "knee" (default), "saturation", "constrained", "curvature", "knee_log",
+                "ideal_point", "weighted_sum", "max_angle", "slope"
 
     Returns:
         (P, T) tuple.

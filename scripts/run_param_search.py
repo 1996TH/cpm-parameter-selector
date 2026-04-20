@@ -13,7 +13,8 @@ Usage (after ``python -m pip install -e .`` from the project root):
     python scripts/run_param_search.py SPY GLD
 
   메소드·P/T 그리드·티커 지정
-    - ``--method``: 자동 선택 방식 (knee, saturation, constrained, curvature, knee_log)
+    - ``--method``: 자동 선택 방식
+      (knee, saturation, constrained, curvature, knee_log, ideal_point, weighted_sum, max_angle, slope)
     - ``--p-min`` / ``--p-max`` / ``--p-step``: 가격 변동 임계 P의 탐색 구간·간격
     - ``--t-min`` / ``--t-max`` / ``--t-step``: 전환점 최소 간격 T(일)의 구간·간격
     아래는 기본 그리드와 동일한 값의 예시이며, 이 플래그들을 모두 생략해도 같은 기본 그리드가 쓰임.
